@@ -1,0 +1,32 @@
+import {useState,type FormEvent,type ReactNode} from 'react'
+import { Plus, Trash2, X } from 'lucide-react'
+import { Dialog } from './widgets'
+import { eventTypes, id, type Entry, type Goal, type Kind, type RecordItem, type Step, type Transaction } from './model'
+export type Edit = {kind:Kind; item?:RecordItem; date:string; expense?:boolean}
+const nouns={transactions:'lançamento',goals:'meta',events:'compromisso'}
+function Field({label,children}:{label:string;children:ReactNode}) {return <label className="field"><span>{label}</span>{children}</label>}
+export function Editor({edit,save,remove,close,categories}:{edit:Edit;save:(item:RecordItem)=>void;remove:()=>void;close:()=>void;categories:string[]}) {
+ const {kind,item}=edit, tx=item as Transaction|undefined, g=item as Goal|undefined,e=item as Entry|undefined
+ const [type,setType]=useState<string>(item?.type||(kind==='transactions'?(edit.expense?'Despesa':'Receita'):kind==='goals'?'Financeira':'Compromisso'))
+ const [steps,setSteps]=useState<Step[]>(g?.steps||[]),[deleting,setDeleting]=useState(false),[err,setErr]=useState('')
+ const [recordId]=useState(()=>item?.id||id())
+ const submit=(ev:FormEvent<HTMLFormElement>)=>{ev.preventDefault();const f=new FormData(ev.currentTarget),s=(k:string)=>String(f.get(k)??'').trim(),cents=(k:string)=>Math.round(Number(s(k).replace(',','.'))*100)
+ const base={id:recordId,title:s('title'),date:s('date')}
+ if(!base.title||!base.date){setErr('Preencha o título e a data.');return}
+ if(kind==='transactions'){if(!s('category')){setErr('Informe a categoria.');return}save({...base,type:type as Transaction['type'],cents:cents('amount'),category:s('category'),paid:s('status')==='paid'})}
+ if(kind==='goals'){const clean=steps.map(v=>({...v,title:v.title.trim()})).filter(v=>v.title)
+ if(type==='Pessoal'&&!clean.length){setErr('Adicione uma etapa para acompanhar o progresso.');return}
+ save({...base,type:type as Goal['type'],target:type==='Financeira'?cents('target'):0,current:type==='Financeira'?cents('current'):0,priority:f.has('priority'),steps:clean,icon:s('icon')})}
+ if(kind==='events') save({...base,type:type as Entry['type'],time:s('time'),place:s('place'),notes:s('notes')})
+ }
+ const title=(item?'Editar ':kind==='goals'?'Nova ':'Novo ')+nouns[kind]
+ return <Dialog title={deleting?'Confirmar exclusão':title} close={close}>{deleting?<><p className="dialogcopy">Excluir “{item?.title}” do seu espaço pessoal?</p><div className="actions"><button className="secondary" onClick={()=>setDeleting(false)}>Voltar</button><button className="danger" onClick={remove}>Confirmar exclusão</button></div></>:<form onSubmit={submit}>
+ <Field label="Título"><input autoFocus required name="title" maxLength={100} defaultValue={item?.title} placeholder={kind==='goals'?'Ex. Reserva de emergência':kind==='events'?'Ex. Reunião de projeto':'Ex. Compras do mês'}/></Field>
+ <div className="formgrid"><Field label="Tipo"><select aria-label="Tipo" value={type} onChange={v=>setType(v.target.value)}>{(kind==='transactions'?['Receita','Despesa']:kind==='goals'?['Financeira','Pessoal']:eventTypes).map(x=><option key={x}>{x}</option>)}</select></Field><Field label={kind==='goals'?'Prazo':kind==='transactions'?'Data / vencimento':'Data'}><input type="date" required name="date" defaultValue={item?.date||edit.date}/></Field></div>
+ {kind==='transactions'&&<><div className="formgrid"><Field label="Valor (R$)"><input required name="amount" type="number" step=".01" min=".01" max="999999999" defaultValue={tx?tx.cents/100:undefined} inputMode="decimal" placeholder="0,00"/></Field><Field label="Situação"><select aria-label="Situação" key={type} name="status" defaultValue={tx&&!tx.paid?'pending':'paid'}><option value="paid">{type==='Receita'?'Recebida':'Paga'}</option><option value="pending">{type==='Receita'?'A receber':'A pagar'}</option></select></Field></div><Field label="Categoria"><input aria-label="Categoria" required maxLength={60} name="category" list="categories" defaultValue={tx?.category} placeholder="Escolha ou digite uma categoria"/><datalist id="categories">{categories.map(x=><option key={x} value={x}/>)}</datalist></Field></>}
+ {kind==='goals'&&<>{type==='Financeira'&&<div className="formgrid"><Field label="Valor da meta (R$)"><input required type="number" inputMode="decimal" min=".01" step=".01" max="999999999" name="target" defaultValue={g?.target?g.target/100:undefined}/></Field><Field label="Valor guardado (R$)"><input required type="number" inputMode="decimal" min="0" step=".01" max="999999999" name="current" defaultValue={(g?.current||0)/100}/></Field></div>}<Field label="Ícone"><select aria-label="Ícone" name="icon" defaultValue={g?.icon||'flag'}><option value="flag">Bandeira</option><option value="shield">Reserva</option><option value="plane">Viagem</option><option value="book">Livro</option></select></Field><div className="stephead"><b>Etapas</b><button className="textbtn" type="button" onClick={()=>setSteps([...steps,{id:id(),title:'',done:false}])}><Plus size={15}/> Adicionar etapa</button></div>{steps.map((step,i)=><div key={step.id} className="steprow"><input type="checkbox" aria-label={'Concluir etapa '+(i+1)} checked={step.done} onChange={e=>setSteps(steps.map(s=>s.id===step.id?{...s,done:e.target.checked}:s))}/><input aria-label={'Etapa '+(i+1)} maxLength={100} placeholder={'Etapa '+(i+1)} value={step.title} onChange={e=>setSteps(steps.map(s=>s.id===step.id?{...s,title:e.target.value}:s))}/><button type="button" className="iconbtn" aria-label={'Remover etapa '+(i+1)} onClick={()=>setSteps(steps.filter(s=>s.id!==step.id))}><X size={16}/></button></div>)}<label className="check"><input type="checkbox" name="priority" defaultChecked={g?.priority??true}/> Mostrar nas metas prioritárias do Início</label></>}
+ {kind==='events'&&<><div className="formgrid"><Field label="Horário (opcional)"><input type="time" name="time" defaultValue={e?.time}/></Field><Field label="Local (opcional)"><input name="place" maxLength={100} defaultValue={e?.place} placeholder="Ex. SENAI"/></Field></div><Field label="Observações (opcional)"><textarea name="notes" maxLength={2000} rows={3} defaultValue={e?.notes}/></Field></>}
+ {err&&<p role="alert" className="error">{err}</p>}
+ <div className="actions">{item&&<button type="button" className="delete" onClick={()=>setDeleting(true)}><Trash2 size={16}/> Excluir</button>}<button type="button" className="secondary" onClick={close}>Cancelar</button><button className="primary" type="submit">Salvar</button></div>
+ </form>}</Dialog>
+}

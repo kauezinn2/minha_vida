@@ -1,0 +1,52 @@
+name: Publicar Minha Vida
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: minha-vida-pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Verificar configuração de sincronização
+        env:
+          PROJECT_URL: ${{ vars.VITE_SUPABASE_URL }}
+          PUBLIC_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          PROJECT_URL="${PROJECT_URL:-$(node -p "require('./src/services/project.json').url")}"
+          PUBLIC_KEY="${PUBLIC_KEY:-$(node -p "require('./src/services/project.json').publishableKey")}"
+          test -n "$PROJECT_URL" && test -n "$PUBLIC_KEY" || { echo "::error::Configure VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY em Settings > Secrets and variables > Actions > Variables."; exit 1; }
+          case "$PUBLIC_KEY" in sb_publishable_*) true ;; *) echo "::error::Use a chave publicável sb_publishable_ do projeto."; exit 1 ;; esac
+      - run: npm ci
+      - uses: actions/configure-pages@v5
+        id: pages
+      - run: npm run build && npm test
+        env:
+          VITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}/
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
